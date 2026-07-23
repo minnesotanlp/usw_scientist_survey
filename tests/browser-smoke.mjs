@@ -18,7 +18,7 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("[data-nav-section]");
 
-  assert.equal(await page.locator("[data-nav-section]").count(), 9);
+  assert.equal(await page.locator("[data-nav-section]").count(), 10);
   assert.match(await page.title(), /Welcome & consent/);
   assert.equal(await page.locator("#response-status").textContent(), "New");
 
@@ -65,7 +65,11 @@ try {
   await page.screenshot({ path: `${outputDir}/desktop-workflow.png`, fullPage: true });
 
   await page.locator("#demo-fill-button").click();
-  await page.locator('[data-nav-section="8"]').click();
+  await page.locator('[data-nav-section="9"]').click();
+  assert.equal((await page.locator("#section-title").textContent()).trim(), "Participant feedback");
+  await page.locator('[data-question-card="H1"]').waitFor();
+  await page.locator('[data-question-card="H5"]').waitFor();
+  await page.screenshot({ path: `${outputDir}/feedback-page.png`, fullPage: true });
   await page.locator("#submit-button").click();
   await page.locator("#submit-dialog[open]").waitFor({ timeout: 10_000 });
 
@@ -74,7 +78,7 @@ try {
   assert.match(recoveryKey, /^USW-(?:[A-Z2-9]{4}-){5}[A-Z2-9]{4}$/);
 
   await page.locator("#submit-dialog-done").click();
-  await page.locator("#input-G4").fill("Edited fictional response for browser testing.");
+  await page.locator("#input-H10").fill("Edited fictional feedback for browser testing.");
   await page.waitForTimeout(900);
   assert.equal(await page.locator("#response-status").textContent(), "Editing");
 

@@ -12,16 +12,16 @@ import {
   workflowToText,
 } from "../survey-core.js";
 
-test("survey v2.0 contains nine sections and unique question IDs", () => {
+test("survey v2.1 contains ten sections and unique question IDs", () => {
   const questions = sections.flatMap((section) => section.questions.filter((question) => question.id));
   const ids = questions.map((question) => question.id);
 
-  assert.equal(sections.length, 9);
-  assert.equal(ids.length, 79);
+  assert.equal(sections.length, 10);
+  assert.equal(ids.length, 91);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(
     sections.map((section) => section.id),
-    ["welcome", "screening", "profile", "goals", "tools", "workflows", "ai", "benchmark", "background"],
+    ["welcome", "screening", "profile", "goals", "tools", "workflows", "ai", "benchmark", "background", "feedback"],
   );
 });
 
@@ -65,6 +65,13 @@ test("conditional AI-agent questions appear only for users with hands-on experie
   assert.equal(isQuestionVisible(E3, { E1: "heard" }), false);
   assert.equal(isQuestionVisible(E3, { E1: "tried" }), true);
   assert.equal(isQuestionVisible(E3, { E1: "weekly" }), true);
+});
+
+test("item-level feedback detail appears only when a section needs revision", () => {
+  const H2a = questionIndex.get("H2a");
+
+  assert.equal(isQuestionVisible(H2a, { H2: ["No changes needed"] }), false);
+  assert.equal(isQuestionVisible(H2a, { H2: ["D — Scientific workflows"] }), true);
 });
 
 test("computational automation matrix exposes only selected activities", () => {
