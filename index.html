@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="University of Scientific Workflow survey on scientific workflows and AI agents."
+    />
+    <meta name="theme-color" content="#0b777f" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Google+Sans+Code:wght@400..700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>USW · Scientific Workflows &amp; AI Agents</title>
+  </head>
+  <body>
+    <noscript>
+      <div class="noscript-banner">This survey requires JavaScript to render its interactive questions.</div>
+    </noscript>
+
+    <div class="app-shell">
+      <header class="mobile-header">
+        <a class="brand-lockup" href="#top" aria-label="USW survey home">
+          <span class="brand-mark" aria-hidden="true">U</span>
+          <span>
+            <strong>USW</strong>
+            <small>Research survey</small>
+          </span>
+        </a>
+        <button class="icon-button" id="mobile-nav-toggle" type="button" aria-expanded="false" aria-controls="section-nav">
+          <span class="sr-only">Toggle section navigation</span>
+          <span aria-hidden="true">☰</span>
+        </button>
+      </header>
+
+      <aside class="sidebar" id="section-nav">
+        <div class="sidebar-top">
+          <a class="brand-lockup" href="#top" aria-label="USW survey home">
+            <span class="brand-mark" aria-hidden="true">U</span>
+            <span>
+              <strong>USW</strong>
+              <small>Research survey</small>
+            </span>
+          </a>
+          <div class="prototype-tag"><span></span> TEST PROTOTYPE</div>
+        </div>
+
+        <nav aria-label="Survey sections">
+          <ol class="section-list" id="section-list"></ol>
+        </nav>
+
+        <div class="sidebar-footer">
+          <p>University of Scientific Workflow</p>
+          <p class="muted">Survey schema v2.0</p>
+        </div>
+      </aside>
+
+      <main class="main-column" id="top">
+        <div class="topbar">
+          <div>
+            <span class="eyebrow" id="section-kicker">SECTION 00</span>
+            <h1 id="section-title">Welcome &amp; consent</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="save-status" id="save-status" aria-live="polite">Not saved yet</span>
+            <button class="button button-ghost" id="resume-button" type="button">Resume</button>
+          </div>
+        </div>
+
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+
+        <div class="notice notice-test" role="note">
+          <div class="notice-icon" aria-hidden="true">⌁</div>
+          <div>
+            <strong>Prototype storage</strong>
+            <p>
+              Test responses stay in this browser only. Nothing is sent to a server. Use fictional identity details while testing.
+            </p>
+            <button class="text-button" id="demo-fill-button" type="button">Load a fictional sample response</button>
+          </div>
+        </div>
+
+        <form id="survey-form" novalidate>
+          <section class="section-intro" id="section-intro"></section>
+          <div class="question-stack" id="question-stack"></div>
+
+          <div class="screenout-panel" id="screenout-panel" hidden>
+            <span class="screenout-code">SCREENING COMPLETE</span>
+            <h2>This research preview is not the right fit for your current profile.</h2>
+            <p>You can go back and review your answers. No response has been submitted.</p>
+          </div>
+
+          <footer class="form-footer">
+            <button class="button button-ghost" id="back-button" type="button">← Back</button>
+            <div class="form-footer-right">
+              <button class="button button-secondary" id="save-button" type="button">Save &amp; continue later</button>
+              <button class="button button-primary" id="next-button" type="button">Continue →</button>
+              <button class="button button-primary" id="submit-button" type="submit" hidden>Submit survey</button>
+            </div>
+          </footer>
+        </form>
+      </main>
+
+      <aside class="context-rail" aria-label="Survey status">
+        <section class="rail-card">
+          <div class="rail-card-header">
+            <span>Completion</span>
+            <strong id="completion-percent">0%</strong>
+          </div>
+          <div class="completion-ring-wrap">
+            <svg class="completion-ring" viewBox="0 0 120 120" role="img" aria-label="Survey completion">
+              <circle class="ring-track" cx="60" cy="60" r="48"></circle>
+              <circle class="ring-value" id="ring-value" cx="60" cy="60" r="48"></circle>
+            </svg>
+            <div class="completion-center">
+              <strong id="answered-count">0</strong>
+              <span>answered</span>
+            </div>
+          </div>
+          <dl class="status-grid">
+            <div><dt>Status</dt><dd id="response-status">New</dd></div>
+            <div><dt>Version</dt><dd id="response-version">—</dd></div>
+            <div><dt>Estimate</dt><dd>~15 min</dd></div>
+          </dl>
+        </section>
+
+        <section class="rail-card">
+          <span class="rail-label">Recovery</span>
+          <h2>Return without an account</h2>
+          <p>Your recovery key restores this response in the same browser during the prototype.</p>
+          <button class="button button-ghost button-full" id="rail-save-button" type="button">Get recovery key</button>
+        </section>
+
+        <section class="rail-card rail-card-compact">
+          <span class="rail-label">Need context?</span>
+          <a href="https://docs.google.com/document/d/1KKOzn0O4I2LYNbZ9alg9y4hozlde6K7QIpU4LdrljUk/edit?tab=t.591kgxyu3nys" target="_blank" rel="noreferrer">
+            Open Survey v2.0 source ↗
+          </a>
+        </section>
+      </aside>
+    </div>
+
+    <dialog class="modal" id="recovery-dialog">
+      <form method="dialog" class="modal-card" id="recovery-form">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">RECOVERY KEY</span>
+            <h2>Resume a saved response</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close recovery dialog">×</button>
+        </div>
+        <p>Enter the key exactly as it was shown when the response was saved.</p>
+        <label class="field-label" for="recovery-input">Recovery key</label>
+        <input class="text-input recovery-input" id="recovery-input" autocomplete="off" spellcheck="false" placeholder="USW-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" />
+        <p class="field-error" id="recovery-error" role="alert"></p>
+        <div class="modal-actions">
+          <button class="button button-ghost" value="cancel">Cancel</button>
+          <button class="button button-primary" id="recovery-load-button" type="button">Load response</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="key-dialog">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow" id="key-dialog-kicker">DRAFT SAVED</span>
+            <h2 id="key-dialog-title">Keep your recovery key</h2>
+          </div>
+          <button class="icon-button" id="key-dialog-close" type="button" aria-label="Close key dialog">×</button>
+        </div>
+        <p id="key-dialog-message">This is the only way to reopen this response after closing the browser.</p>
+        <div class="key-display">
+          <code id="recovery-key-display"></code>
+          <button class="button button-small" id="copy-key-button" type="button">Copy</button>
+        </div>
+        <div class="modal-actions modal-actions-spread">
+          <button class="button button-ghost" id="download-key-button" type="button">Download key</button>
+          <button class="button button-primary" id="key-dialog-done" type="button">I saved it</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="submit-dialog">
+      <div class="modal-card success-card">
+        <div class="success-mark" aria-hidden="true">✓</div>
+        <span class="eyebrow">SUBMISSION RECEIVED</span>
+        <h2>Thank you for mapping how science really works.</h2>
+        <p>Your prototype response has been stored locally as version <strong id="submitted-version">1</strong>.</p>
+        <div class="key-display">
+          <code id="submitted-key"></code>
+          <button class="button button-small" id="copy-submitted-key" type="button">Copy</button>
+        </div>
+        <p class="fine-print">Use this key to reopen and edit the response in this browser.</p>
+        <div class="modal-actions modal-actions-spread">
+          <button class="button button-ghost" id="export-response-button" type="button">Export JSON</button>
+          <button class="button button-primary" id="submit-dialog-done" type="button">Return to survey</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
