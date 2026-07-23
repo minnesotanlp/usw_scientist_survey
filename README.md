@@ -2,7 +2,7 @@
 
 Interactive test implementation of **Scientist Survey v2.0** for the University of Scientific Workflow project.
 
-The page includes all nine survey sections, conditional branching, validation, progress tracking, a repeatable tool inventory, and an interactive D0 workflow builder with ordered stages, branches, and loops. A respondent can save, receive a recovery key, reopen, edit, and resubmit a versioned response.
+The page includes all nine survey sections, conditional branching, validation, progress tracking, a repeatable tool inventory, and a freeform D0 workflow scratchpad. Respondents can add and name Lego-like blocks, drag them around a canvas, and draw flow, branch, loop, or self-loop arrows between them. A respondent can save, receive a recovery key, reopen, edit, and resubmit a versioned response.
 
 ## Important: prototype storage
 

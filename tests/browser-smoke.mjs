@@ -24,12 +24,44 @@ try {
 
   await page.locator('[data-nav-section="5"]').click();
   await page.waitForSelector('[data-action="load-workflow-example"]');
-  assert.equal(await page.locator(".workflow-stage[draggable]").count(), 3);
+  assert.equal(await page.locator(".workflow-node").count(), 3);
+  assert.equal(await page.locator(".workflow-edge.flow").count(), 2);
 
   await page.locator('[data-action="load-workflow-example"]').click();
-  assert.equal(await page.locator(".workflow-stage[draggable]").count(), 7);
+  assert.equal(await page.locator(".workflow-node").count(), 7);
+  assert.equal(await page.locator(".workflow-edge").count(), 7);
   assert.match(await page.locator(".workflow-preview").textContent(), /Research question/);
-  assert.match(await page.locator(".workflow-preview").textContent(), /LOOP/);
+  assert.match(await page.locator(".workflow-preview").textContent(), /↺/);
+
+  await page.locator('[data-action="add-stage"]').click();
+  assert.equal(await page.locator(".workflow-node").count(), 8);
+  await page.locator(".workflow-node").last().locator(".workflow-node-name").fill("Publication");
+
+  await page.locator('[data-workflow-tool="flow"]').click();
+  await page.locator(".workflow-node").nth(6).locator(".workflow-port-out").click();
+  await page.locator(".workflow-node").nth(7).locator(".workflow-port-in").click();
+  assert.equal(await page.locator(".workflow-edge.flow").count(), 7);
+
+  await page.locator('[data-workflow-tool="branch"]').click();
+  await page.locator(".workflow-node").nth(2).locator(".workflow-port-out").click();
+  await page.locator(".workflow-node").nth(4).locator(".workflow-port-in").click();
+  assert.equal(await page.locator(".workflow-edge.branch").count(), 1);
+
+  await page.locator('[data-workflow-tool="loop"]').click();
+  await page.locator(".workflow-node").last().locator(".workflow-port-out").click();
+  await page.locator(".workflow-node").last().locator(".workflow-port-in").click();
+  assert.equal(await page.locator(".workflow-edge.loop").count(), 2);
+
+  const dragHandle = page.locator(".workflow-node").last().locator(".workflow-drag-handle");
+  const beforeDrag = await page.locator(".workflow-node").last().getAttribute("style");
+  const dragBox = await dragHandle.boundingBox();
+  assert.ok(dragBox);
+  await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + 60, dragBox.y - 10, { steps: 6 });
+  await page.mouse.up();
+  assert.notEqual(await page.locator(".workflow-node").last().getAttribute("style"), beforeDrag);
+  await page.locator(".workflow-builder").screenshot({ path: `${outputDir}/workflow-scratchpad.png` });
   await page.screenshot({ path: `${outputDir}/desktop-workflow.png`, fullPage: true });
 
   await page.locator("#demo-fill-button").click();
