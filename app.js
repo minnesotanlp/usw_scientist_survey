@@ -76,7 +76,13 @@ const state = {
 };
 
 let autosaveTimer = null;
-let draggedStageId = null;
+let workflowTool = "select";
+let workflowConnectionSourceId = null;
+let workflowSelectedStageId = null;
+let workflowDrag = null;
+
+const WORKFLOW_CANVAS_WIDTH = 720;
+const WORKFLOW_CANVAS_HEIGHT = 520;
 
 function escapeHtml(value = "") {
   return String(value)
@@ -385,98 +391,228 @@ function renderToolRepeater(question) {
   );
 }
 
-function workflowPreviewInner(workflow) {
-  const stages = (workflow.stages || []).filter((stage) => stage.label.trim());
-  const labels = new Map(stages.map((stage, index) => [stage.id, { label: stage.label, index: index + 1 }]));
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function automaticWorkflowLayout(count) {
+  if (count <= 4) {
+    return Array.from({ length: count }, (_, index) => ({
+      x: count === 1 ? 0.5 : 0.14 + (index * 0.72) / (count - 1),
+      y: 0.5,
+    }));
+  }
+
+  const columns = 3;
+  const rows = Math.ceil(count / columns);
+  return Array.from({ length: count }, (_, index) => {
+    const row = Math.floor(index / columns);
+    const indexInRow = index % columns;
+    const itemsInRow = Math.min(columns, count - row * columns);
+    const orderedIndex = row % 2 === 0 ? indexInRow : itemsInRow - 1 - indexInRow;
+    return {
+      x: itemsInRow === 1 ? 0.5 : 0.16 + (orderedIndex * 0.68) / (itemsInRow - 1),
+      y: rows === 1 ? 0.5 : 0.22 + (row * 0.56) / (rows - 1),
+    };
+  });
+}
+
+function ensureWorkflowLayout(workflow) {
+  workflow.stages ||= [];
+  workflow.connections ||= [];
+  const fallback = automaticWorkflowLayout(workflow.stages.length);
+  workflow.stages.forEach((stage, index) => {
+    stage.x = clamp(Number.isFinite(Number(stage.x)) ? Number(stage.x) : fallback[index].x, 0.12, 0.88);
+    stage.y = clamp(Number.isFinite(Number(stage.y)) ? Number(stage.y) : fallback[index].y, 0.12, 0.88);
+  });
+}
+
+function workflowPoint(stage) {
+  return {
+    x: Number(stage.x) * WORKFLOW_CANVAS_WIDTH,
+    y: Number(stage.y) * WORKFLOW_CANVAS_HEIGHT,
+  };
+}
+
+function straightConnectionPath(from, to, curved = false) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.max(Math.hypot(dx, dy), 1);
+  const ux = dx / distance;
+  const uy = dy / distance;
+  const horizontalBoundary = Math.abs(ux) > 0.001 ? 88 / Math.abs(ux) : Number.POSITIVE_INFINITY;
+  const verticalBoundary = Math.abs(uy) > 0.001 ? 57 / Math.abs(uy) : Number.POSITIVE_INFINITY;
+  const boundary = Math.min(horizontalBoundary, verticalBoundary);
+  const startPadding = boundary + 5;
+  const endPadding = boundary + 15;
+  const start = { x: from.x + ux * startPadding, y: from.y + uy * startPadding };
+  const end = { x: to.x - ux * endPadding, y: to.y - uy * endPadding };
+  if (!curved) return `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+  const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  const control = { x: midpoint.x - uy * 58, y: midpoint.y + ux * 58 };
+  return `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} Q ${control.x.toFixed(1)} ${control.y.toFixed(1)} ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+}
+
+function loopConnectionPath(from, to, sameStage) {
+  if (sameStage) {
+    const direction = from.x < WORKFLOW_CANVAS_WIDTH / 2 ? 1 : -1;
+    const edgeX = from.x + direction * 78;
+    const arcX = from.x + direction * 148;
+    return `M ${edgeX.toFixed(1)} ${(from.y - 28).toFixed(1)} C ${arcX.toFixed(1)} ${(from.y - 88).toFixed(1)}, ${arcX.toFixed(1)} ${(from.y + 88).toFixed(1)}, ${edgeX.toFixed(1)} ${(from.y + 28).toFixed(1)}`;
+  }
+  const useTop = Math.min(from.y, to.y) > 145;
+  const arcY = useTop ? Math.max(22, Math.min(from.y, to.y) - 112) : Math.min(WORKFLOW_CANVAS_HEIGHT - 22, Math.max(from.y, to.y) + 112);
+  const fromY = from.y + (useTop ? -48 : 48);
+  const toY = to.y + (useTop ? -54 : 54);
+  return `M ${from.x.toFixed(1)} ${fromY.toFixed(1)} C ${from.x.toFixed(1)} ${arcY.toFixed(1)}, ${to.x.toFixed(1)} ${arcY.toFixed(1)}, ${to.x.toFixed(1)} ${toY.toFixed(1)}`;
+}
+
+function workflowEdgesInner(questionId, workflow) {
+  const stageMap = new Map(workflow.stages.map((stage) => [stage.id, stage]));
+  const markerPrefix = `workflow-${questionId}`;
+  const paths = workflow.connections
+    .map((connection) => {
+      const fromStage = stageMap.get(connection.from);
+      const toStage = stageMap.get(connection.to);
+      if (!fromStage || !toStage) return "";
+      const from = workflowPoint(fromStage);
+      const to = workflowPoint(toStage);
+      const path =
+        connection.type === "loop"
+          ? loopConnectionPath(from, to, connection.from === connection.to)
+          : straightConnectionPath(from, to, connection.type === "branch");
+      const type = ["flow", "branch", "loop"].includes(connection.type) ? connection.type : "branch";
+      return `<path class="workflow-edge ${type}" d="${path}" marker-end="url(#${markerPrefix}-${type})"></path>`;
+    })
+    .join("");
+
   return `
-    <h4>Live workflow preview</h4>
-    <div class="workflow-preview-line">
-      ${
-        stages.length
-          ? stages
-              .map(
-                (stage, index) => `${index ? '<span class="workflow-preview-arrow">→</span>' : ""}<span class="workflow-preview-node">${escapeHtml(stage.label)}</span>`,
-              )
-              .join("")
-          : '<span class="muted">Name stages to build the preview.</span>'
-      }
-    </div>
+    <defs>
+      <marker id="${markerPrefix}-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
+      <marker id="${markerPrefix}-branch" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
+      <marker id="${markerPrefix}-loop" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
+    </defs>
+    ${paths}`;
+}
+
+function connectionTypeLabel(type) {
+  if (type === "loop") return "↺ Loop";
+  if (type === "branch") return "⇢ Branch";
+  return "→ Flow";
+}
+
+function workflowPreviewInner(workflow) {
+  const lines = workflowToText(workflow)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return `
+    <h4>Text outline generated from the canvas</h4>
     <div class="workflow-preview-connections">
-      ${(workflow.connections || [])
-        .filter((connection) => labels.has(connection.from) && labels.has(connection.to))
-        .map((connection) => {
-          const from = labels.get(connection.from);
-          const to = labels.get(connection.to);
-          return `<span>${connection.type === "loop" ? "↺ LOOP" : "⇢ BRANCH"} · ${escapeHtml(from.label)} → ${escapeHtml(to.label)}${connection.condition ? ` · ${escapeHtml(connection.condition)}` : ""}</span>`;
-        })
-        .join("")}
+      ${lines.length ? lines.map((line) => `<span>${escapeHtml(line)}</span>`).join("") : '<span class="muted">Name and connect blocks to build the outline.</span>'}
     </div>`;
 }
 
-function workflowStageOptions(workflow) {
-  return workflow.stages
-    .map((stage, index) => `<option value="${stage.id}">${index + 1}. ${escapeHtml(stage.label || `Stage ${index + 1}`)}</option>`)
-    .join("");
+function workflowModeHint() {
+  if (workflowConnectionSourceId) return "Source selected. Now click the destination block.";
+  if (workflowTool === "flow") return "Click a source block, then a destination block to draw a solid arrow.";
+  if (workflowTool === "branch") return "Click a source block, then a destination block to draw a decision branch.";
+  if (workflowTool === "loop") return "Click a later block, then the block to repeat. A block may also loop to itself.";
+  return "Drag blocks by their grip. Click a block name to type directly into it.";
 }
 
 function renderWorkflow(question) {
   const workflow = answerValue(question.id, createInitialWorkflow());
-  const stageCards = workflow.stages
+  ensureWorkflowLayout(workflow);
+  if (workflowConnectionSourceId && !workflow.stages.some((stage) => stage.id === workflowConnectionSourceId)) {
+    workflowConnectionSourceId = null;
+  }
+
+  const stageMap = new Map(workflow.stages.map((stage) => [stage.id, stage]));
+  const nodes = workflow.stages
     .map(
       (stage, index) => `
-        <div class="workflow-stage-wrap" data-drop-stage="${stage.id}">
-          <div class="workflow-stage" draggable="true" data-stage-id="${stage.id}">
-            <span class="stage-number">${String(index + 1).padStart(2, "0")}</span>
-            <div class="stage-fields">
-              <input class="text-input" data-kind="workflow-stage" data-question="${question.id}" data-stage-id="${stage.id}" data-stage-key="label" value="${escapeHtml(stage.label)}" placeholder="Stage name" aria-label="Stage ${index + 1} name" />
-              <input class="text-input" data-kind="workflow-stage" data-question="${question.id}" data-stage-id="${stage.id}" data-stage-key="detail" value="${escapeHtml(stage.detail || "")}" placeholder="Optional method, output, or decision detail" aria-label="Stage ${index + 1} detail" />
-            </div>
-            <div class="stage-actions">
-              <button class="stage-action" type="button" data-action="move-stage-up" data-question="${question.id}" data-stage-index="${index}" ${index === 0 ? "disabled" : ""} aria-label="Move stage ${index + 1} up">↑</button>
-              <button class="stage-action" type="button" data-action="move-stage-down" data-question="${question.id}" data-stage-index="${index}" ${index === workflow.stages.length - 1 ? "disabled" : ""} aria-label="Move stage ${index + 1} down">↓</button>
-              <button class="stage-action" type="button" data-action="remove-stage" data-question="${question.id}" data-stage-id="${stage.id}" ${workflow.stages.length <= 2 ? "disabled" : ""} aria-label="Remove stage ${index + 1}">×</button>
-            </div>
+        <div
+          class="workflow-node ${workflowConnectionSourceId === stage.id ? "is-connection-source" : ""} ${workflowSelectedStageId === stage.id ? "is-selected" : ""}"
+          data-workflow-node="${stage.id}"
+          data-question="${question.id}"
+          style="left: ${(stage.x * 100).toFixed(2)}%; top: ${(stage.y * 100).toFixed(2)}%;"
+        >
+          <button class="workflow-port workflow-port-in" type="button" data-action="choose-workflow-node" data-question="${question.id}" data-stage-id="${stage.id}" aria-label="Use block ${index + 1} as a connection endpoint"></button>
+          <button class="workflow-port workflow-port-out" type="button" data-action="choose-workflow-node" data-question="${question.id}" data-stage-id="${stage.id}" aria-label="Use block ${index + 1} as a connection endpoint"></button>
+          <div class="workflow-studs" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div class="workflow-node-header">
+            <button class="workflow-drag-handle" type="button" data-workflow-drag-handle data-question="${question.id}" data-stage-id="${stage.id}" aria-label="Drag block ${index + 1}; use arrow keys for precise movement">
+              <span aria-hidden="true">⠿</span> BLOCK ${String(index + 1).padStart(2, "0")}
+            </button>
+            <button class="workflow-node-remove" type="button" data-action="remove-stage" data-question="${question.id}" data-stage-id="${stage.id}" ${workflow.stages.length <= 2 ? "disabled" : ""} aria-label="Remove block ${index + 1}">×</button>
           </div>
+          <label class="sr-only" for="${question.id}-stage-${stage.id}-label">Block ${index + 1} name</label>
+          <input class="workflow-node-name" id="${question.id}-stage-${stage.id}-label" data-kind="workflow-stage" data-question="${question.id}" data-stage-id="${stage.id}" data-stage-key="label" value="${escapeHtml(stage.label)}" placeholder="Click to name this step" />
+          <label class="sr-only" for="${question.id}-stage-${stage.id}-detail">Block ${index + 1} optional detail</label>
+          <input class="workflow-node-detail" id="${question.id}-stage-${stage.id}-detail" data-kind="workflow-stage" data-question="${question.id}" data-stage-id="${stage.id}" data-stage-key="detail" value="${escapeHtml(stage.detail || "")}" placeholder="Optional method or output" />
         </div>`,
     )
     .join("");
 
-  const connectionChips = (workflow.connections || [])
+  const connections = workflow.connections
     .map((connection, index) => {
-      const fromIndex = workflow.stages.findIndex((stage) => stage.id === connection.from);
-      const toIndex = workflow.stages.findIndex((stage) => stage.id === connection.to);
-      if (fromIndex < 0 || toIndex < 0) return "";
-      return `<span class="connection-chip ${connection.type}">
-        ${connection.type === "loop" ? "↺ LOOP" : "⇢ BRANCH"} · ${fromIndex + 1} → ${toIndex + 1}${connection.condition ? ` · ${escapeHtml(connection.condition)}` : ""}
-        <button type="button" data-action="remove-connection" data-question="${question.id}" data-connection-index="${index}" aria-label="Remove connection">×</button>
-      </span>`;
+      const from = stageMap.get(connection.from);
+      const to = stageMap.get(connection.to);
+      if (!from || !to) return "";
+      const fromLabel = from.label.trim() || `Block ${workflow.stages.indexOf(from) + 1}`;
+      const toLabel = to.label.trim() || `Block ${workflow.stages.indexOf(to) + 1}`;
+      return `
+        <div class="workflow-connection-row ${connection.type}">
+          <span class="workflow-connection-type">${connectionTypeLabel(connection.type)}</span>
+          <span class="workflow-connection-route">
+            <strong data-workflow-label-stage="${from.id}">${escapeHtml(fromLabel)}</strong>
+            <span aria-hidden="true">${connection.type === "loop" ? "↺" : connection.type === "branch" ? "⇢" : "→"}</span>
+            <strong data-workflow-label-stage="${to.id}">${escapeHtml(toLabel)}</strong>
+          </span>
+          ${
+            connection.type === "flow"
+              ? '<span class="workflow-connection-note">Direct step</span>'
+              : `<input class="workflow-connection-condition" data-kind="workflow-connection" data-question="${question.id}" data-connection-id="${connection.id}" value="${escapeHtml(connection.condition || "")}" placeholder="Optional condition, e.g. if validation fails" aria-label="Condition for ${escapeHtml(fromLabel)} to ${escapeHtml(toLabel)}" />`
+          }
+          <button class="workflow-connection-remove" type="button" data-action="remove-connection" data-question="${question.id}" data-connection-index="${index}" aria-label="Remove ${connectionTypeLabel(connection.type)} connection">×</button>
+        </div>`;
     })
     .join("");
 
   const body = `
     <div class="workflow-builder">
       <div class="workflow-toolbar">
-        <span>DRAG OR USE ↑ ↓ TO REORDER</span>
-        <div>
+        <div class="workflow-toolbar-copy">
+          <strong>WORKFLOW SCRATCHPAD</strong>
+          <span>Build it like Lego: add, name, drag, then connect blocks.</span>
+        </div>
+        <div class="workflow-toolbar-actions">
           <button class="button button-small" type="button" data-action="load-workflow-example" data-question="${question.id}">Load example</button>
-          <button class="button button-small" type="button" data-action="add-stage" data-question="${question.id}">+ Add stage</button>
+          <button class="button button-small" type="button" data-action="auto-layout-workflow" data-question="${question.id}">Auto-layout</button>
+          <button class="button button-small workflow-add-block" type="button" data-action="add-stage" data-question="${question.id}">+ Add block</button>
         </div>
       </div>
-      <div class="workflow-stage-list">${stageCards}</div>
-      <div class="connection-editor">
-        <h4>Add a decision branch or loop</h4>
-        <div class="connection-form" data-connection-form="${question.id}">
-          <select class="select-input" data-connection-field="type" aria-label="Connection type">
-            <option value="loop">Loop back ↺</option>
-            <option value="branch">Branch ⇢</option>
-          </select>
-          <select class="select-input" data-connection-field="from" aria-label="Connection from stage">${workflowStageOptions(workflow)}</select>
-          <span class="connection-arrow">→</span>
-          <select class="select-input" data-connection-field="to" aria-label="Connection to stage">${workflowStageOptions(workflow)}</select>
-          <input class="text-input connection-condition" data-connection-field="condition" placeholder="Condition, e.g. if validation fails" aria-label="Connection condition" />
-          <button class="button button-secondary" type="button" data-action="add-connection" data-question="${question.id}">Add</button>
+      <div class="workflow-modebar" role="toolbar" aria-label="Workflow canvas tools">
+        <button type="button" data-action="set-workflow-tool" data-question="${question.id}" data-workflow-tool="select" aria-pressed="${workflowTool === "select"}">↖ Move / edit</button>
+        <button type="button" data-action="set-workflow-tool" data-question="${question.id}" data-workflow-tool="flow" aria-pressed="${workflowTool === "flow"}">→ Connect</button>
+        <button type="button" data-action="set-workflow-tool" data-question="${question.id}" data-workflow-tool="branch" aria-pressed="${workflowTool === "branch"}">⇢ Branch</button>
+        <button type="button" data-action="set-workflow-tool" data-question="${question.id}" data-workflow-tool="loop" aria-pressed="${workflowTool === "loop"}">↺ Loop</button>
+        <span class="workflow-mode-hint" aria-live="polite">${escapeHtml(workflowModeHint())}</span>
+      </div>
+      <div class="workflow-canvas-scroll" tabindex="0" aria-label="Scrollable workflow scratchpad">
+        <div class="workflow-canvas" id="workflow-canvas-${question.id}" data-workflow-canvas="${question.id}">
+          <svg class="workflow-edge-layer" id="workflow-edges-${question.id}" viewBox="0 0 ${WORKFLOW_CANVAS_WIDTH} ${WORKFLOW_CANVAS_HEIGHT}" preserveAspectRatio="none" aria-hidden="true">${workflowEdgesInner(question.id, workflow)}</svg>
+          <div class="workflow-canvas-label" aria-hidden="true">DRAG BLOCKS · CLICK TO CONNECT</div>
+          ${nodes}
         </div>
-        <div class="connection-list">${connectionChips}</div>
+      </div>
+      <div class="workflow-connections-panel">
+        <div class="workflow-connections-header">
+          <div><span class="eyebrow">CONNECTIONS</span><strong>${workflow.connections.length} drawn</strong></div>
+          <button class="text-button" type="button" data-action="clear-workflow-connections" data-question="${question.id}" ${workflow.connections.length ? "" : "disabled"}>Clear all arrows</button>
+        </div>
+        <div class="workflow-connection-list">${connections || '<p class="workflow-empty-connections">No arrows yet. Choose Connect, Branch, or Loop above.</p>'}</div>
       </div>
       <div class="workflow-preview" id="workflow-preview-${question.id}">${workflowPreviewInner(workflow)}</div>
     </div>`;
@@ -604,6 +740,18 @@ function handleFormInput(event) {
   } else if (kind === "workflow-stage") {
     const stage = state.answers[questionId].stages.find((item) => item.id === target.dataset.stageId);
     if (stage) stage[target.dataset.stageKey] = target.value;
+    if (target.dataset.stageKey === "label") {
+      const stageIndex = state.answers[questionId].stages.findIndex((item) => item.id === target.dataset.stageId);
+      const label = target.value.trim() || `Block ${stageIndex + 1}`;
+      document
+        .querySelectorAll(`[data-workflow-label-stage="${CSS.escape(target.dataset.stageId)}"]`)
+        .forEach((element) => (element.textContent = label));
+    }
+    const preview = document.querySelector(`#workflow-preview-${CSS.escape(questionId)}`);
+    if (preview) preview.innerHTML = workflowPreviewInner(state.answers[questionId]);
+  } else if (kind === "workflow-connection") {
+    const connection = state.answers[questionId].connections.find((item) => item.id === target.dataset.connectionId);
+    if (connection) connection.condition = target.value;
     const preview = document.querySelector(`#workflow-preview-${CSS.escape(questionId)}`);
     if (preview) preview.innerHTML = workflowPreviewInner(state.answers[questionId]);
   }
@@ -648,12 +796,6 @@ function handleFormChange(event) {
   if (requiresRender) render();
 }
 
-function moveArrayItem(array, from, to) {
-  if (from === to || from < 0 || to < 0 || from >= array.length || to >= array.length) return;
-  const [item] = array.splice(from, 1);
-  array.splice(to, 0, item);
-}
-
 function addTool(questionId) {
   state.answers[questionId] ||= [];
   state.answers[questionId].push({ name: "", category: "", purpose: "", interaction: [], location: [], access: [] });
@@ -665,40 +807,151 @@ function addTool(questionId) {
   });
 }
 
+function nextWorkflowPosition(workflow) {
+  const candidates = [
+    { x: 0.5, y: 0.2 },
+    { x: 0.5, y: 0.8 },
+    { x: 0.2, y: 0.2 },
+    { x: 0.8, y: 0.2 },
+    { x: 0.2, y: 0.8 },
+    { x: 0.8, y: 0.8 },
+    { x: 0.35, y: 0.5 },
+    { x: 0.65, y: 0.5 },
+  ];
+  return candidates.reduce(
+    (best, candidate) => {
+      const nearest = workflow.stages.reduce(
+        (distance, stage) => Math.min(distance, Math.hypot(candidate.x - stage.x, candidate.y - stage.y)),
+        Number.POSITIVE_INFINITY,
+      );
+      return nearest > best.distance ? { ...candidate, distance: nearest } : best;
+    },
+    { ...candidates[0], distance: -1 },
+  );
+}
+
 function addStage(questionId) {
-  state.answers[questionId].stages.push({ id: makeId("stage"), label: "", detail: "" });
+  const workflow = state.answers[questionId];
+  ensureWorkflowLayout(workflow);
+  const position = nextWorkflowPosition(workflow);
+  const stage = { id: makeId("stage"), label: "", detail: "", x: position.x, y: position.y };
+  workflow.stages.push(stage);
+  workflowSelectedStageId = stage.id;
+  workflowTool = "select";
+  workflowConnectionSourceId = null;
   markChanged(questionId);
   render();
+  requestAnimationFrame(() => {
+    document.querySelector(`[data-workflow-node="${CSS.escape(stage.id)}"] .workflow-node-name`)?.focus();
+  });
 }
 
 function createExampleWorkflow() {
   const labels = ["Research question", "Material synthesis", "Spectroscopy measurement", "Data processing", "Structure analysis", "Validation", "Interpretation"];
-  const stages = labels.map((label) => ({ id: makeId("stage"), label, detail: "" }));
+  const positions = [
+    { x: 0.16, y: 0.2 },
+    { x: 0.5, y: 0.2 },
+    { x: 0.84, y: 0.2 },
+    { x: 0.84, y: 0.5 },
+    { x: 0.84, y: 0.8 },
+    { x: 0.5, y: 0.8 },
+    { x: 0.16, y: 0.8 },
+  ];
+  const stages = labels.map((label, index) => ({ id: makeId("stage"), label, detail: "", ...positions[index] }));
+  const flows = stages.slice(0, -1).map((stage, index) => ({
+    id: makeId("connection"),
+    type: "flow",
+    from: stage.id,
+    to: stages[index + 1].id,
+    condition: "",
+  }));
   return {
     stages,
-    connections: [{ id: makeId("connection"), type: "loop", from: stages[4].id, to: stages[1].id, condition: "if validation indicates a problem" }],
+    connections: [
+      ...flows,
+      { id: makeId("connection"), type: "loop", from: stages[4].id, to: stages[1].id, condition: "if validation indicates a problem" },
+    ],
   };
 }
 
 function loadWorkflowExample(questionId) {
   state.answers[questionId] = createExampleWorkflow();
+  workflowTool = "select";
+  workflowConnectionSourceId = null;
+  workflowSelectedStageId = null;
   markChanged(questionId);
   render();
 }
 
-function addConnection(questionId, button) {
-  const form = button.closest(`[data-connection-form="${CSS.escape(questionId)}"]`);
-  const type = form.querySelector('[data-connection-field="type"]').value;
-  const from = form.querySelector('[data-connection-field="from"]').value;
-  const to = form.querySelector('[data-connection-field="to"]').value;
-  const condition = form.querySelector('[data-connection-field="condition"]').value.trim();
-  if (!from || !to || from === to) {
-    showToast("Choose two different stages for the connection.");
-    return;
-  }
-  state.answers[questionId].connections.push({ id: makeId("connection"), type, from, to, condition });
+function setWorkflowTool(tool) {
+  workflowTool = ["select", "flow", "branch", "loop"].includes(tool) ? tool : "select";
+  workflowConnectionSourceId = null;
+  render();
+}
+
+function autoLayoutWorkflow(questionId) {
+  const workflow = state.answers[questionId];
+  const positions = automaticWorkflowLayout(workflow.stages.length);
+  workflow.stages.forEach((stage, index) => Object.assign(stage, positions[index]));
+  workflowConnectionSourceId = null;
   markChanged(questionId);
   render();
+  showToast("Blocks arranged automatically.");
+}
+
+function clearWorkflowConnections(questionId) {
+  state.answers[questionId].connections = [];
+  workflowConnectionSourceId = null;
+  markChanged(questionId);
+  render();
+  showToast("All workflow arrows removed.");
+}
+
+function connectWorkflowStages(questionId, stageId) {
+  if (!workflowConnectionSourceId) {
+    workflowConnectionSourceId = stageId;
+    workflowSelectedStageId = stageId;
+    render();
+    return;
+  }
+
+  const from = workflowConnectionSourceId;
+  const to = stageId;
+  if (from === to && workflowTool !== "loop") {
+    showToast("Choose a different destination block, or use Loop for a self-loop.");
+    return;
+  }
+
+  const workflow = state.answers[questionId];
+  const duplicate = workflow.connections.some(
+    (connection) => connection.type === workflowTool && connection.from === from && connection.to === to,
+  );
+  if (duplicate) {
+    showToast("That arrow already exists.");
+    workflowConnectionSourceId = null;
+    render();
+    return;
+  }
+
+  workflow.connections.push({ id: makeId("connection"), type: workflowTool, from, to, condition: "" });
+  workflowConnectionSourceId = null;
+  workflowSelectedStageId = to;
+  markChanged(questionId);
+  render();
+  showToast(`${connectionTypeLabel(workflowTool)} arrow added.`);
+}
+
+function handleWorkflowNodeClick(node) {
+  const questionId = node.dataset.question;
+  const stageId = node.dataset.workflowNode;
+  if (workflowTool !== "select") {
+    connectWorkflowStages(questionId, stageId);
+    return;
+  }
+
+  workflowSelectedStageId = stageId;
+  document.querySelectorAll("[data-workflow-node]").forEach((item) => item.classList.toggle("is-selected", item === node));
+  node.querySelector(".workflow-node-name")?.focus();
 }
 
 function handleActionClick(button) {
@@ -714,22 +967,21 @@ function handleActionClick(button) {
   }
   if (action === "add-stage") addStage(questionId);
   if (action === "load-workflow-example") loadWorkflowExample(questionId);
-  if (action === "move-stage-up" || action === "move-stage-down") {
-    const index = Number(button.dataset.stageIndex);
-    moveArrayItem(state.answers[questionId].stages, index, action === "move-stage-up" ? index - 1 : index + 1);
-    markChanged(questionId);
-    render();
-  }
+  if (action === "choose-workflow-node") handleWorkflowNodeClick(button.closest("[data-workflow-node]"));
+  if (action === "set-workflow-tool") setWorkflowTool(button.dataset.workflowTool);
+  if (action === "auto-layout-workflow") autoLayoutWorkflow(questionId);
+  if (action === "clear-workflow-connections") clearWorkflowConnections(questionId);
   if (action === "remove-stage") {
     const workflow = state.answers[questionId];
     workflow.stages = workflow.stages.filter((stage) => stage.id !== button.dataset.stageId);
     workflow.connections = workflow.connections.filter(
       (connection) => connection.from !== button.dataset.stageId && connection.to !== button.dataset.stageId,
     );
+    if (workflowConnectionSourceId === button.dataset.stageId) workflowConnectionSourceId = null;
+    if (workflowSelectedStageId === button.dataset.stageId) workflowSelectedStageId = null;
     markChanged(questionId);
     render();
   }
-  if (action === "add-connection") addConnection(questionId, button);
   if (action === "remove-connection") {
     state.answers[questionId].connections.splice(Number(button.dataset.connectionIndex), 1);
     markChanged(questionId);
@@ -1006,12 +1258,89 @@ function fillDemoResponse() {
   scheduleAutosave();
 }
 
+function renderWorkflowEdges(questionId) {
+  const workflow = state.answers[questionId];
+  const edgeLayer = document.querySelector(`#workflow-edges-${CSS.escape(questionId)}`);
+  if (workflow && edgeLayer) edgeLayer.innerHTML = workflowEdgesInner(questionId, workflow);
+}
+
+function beginWorkflowDrag(event, handle) {
+  if (event.button !== undefined && event.button !== 0) return;
+  const questionId = handle.dataset.question;
+  const stageId = handle.dataset.stageId;
+  const node = handle.closest("[data-workflow-node]");
+  const canvas = handle.closest("[data-workflow-canvas]");
+  if (!node || !canvas) return;
+
+  event.preventDefault();
+  workflowTool = "select";
+  workflowConnectionSourceId = null;
+  workflowSelectedStageId = stageId;
+  workflowDrag = { questionId, stageId, node, canvas, handle, pointerId: event.pointerId };
+  node.classList.add("is-dragging", "is-selected");
+  handle.setPointerCapture?.(event.pointerId);
+}
+
+function moveWorkflowDrag(event) {
+  if (!workflowDrag || event.pointerId !== workflowDrag.pointerId) return;
+  const rect = workflowDrag.canvas.getBoundingClientRect();
+  const stage = state.answers[workflowDrag.questionId].stages.find((item) => item.id === workflowDrag.stageId);
+  if (!stage || !rect.width || !rect.height) return;
+
+  stage.x = clamp((event.clientX - rect.left) / rect.width, 0.12, 0.88);
+  stage.y = clamp((event.clientY - rect.top) / rect.height, 0.12, 0.88);
+  workflowDrag.node.style.left = `${(stage.x * 100).toFixed(2)}%`;
+  workflowDrag.node.style.top = `${(stage.y * 100).toFixed(2)}%`;
+  renderWorkflowEdges(workflowDrag.questionId);
+}
+
+function endWorkflowDrag(event) {
+  if (!workflowDrag || event.pointerId !== workflowDrag.pointerId) return;
+  workflowDrag.handle.releasePointerCapture?.(event.pointerId);
+  workflowDrag.node.classList.remove("is-dragging");
+  const questionId = workflowDrag.questionId;
+  workflowDrag = null;
+  markChanged(questionId);
+}
+
+function nudgeWorkflowStage(event, handle) {
+  const deltas = {
+    ArrowLeft: [-0.015, 0],
+    ArrowRight: [0.015, 0],
+    ArrowUp: [0, -0.02],
+    ArrowDown: [0, 0.02],
+  };
+  const delta = deltas[event.key];
+  if (!delta) return;
+  event.preventDefault();
+  const questionId = handle.dataset.question;
+  const stage = state.answers[questionId].stages.find((item) => item.id === handle.dataset.stageId);
+  if (!stage) return;
+  stage.x = clamp(stage.x + delta[0], 0.12, 0.88);
+  stage.y = clamp(stage.y + delta[1], 0.12, 0.88);
+  const node = handle.closest("[data-workflow-node]");
+  node.style.left = `${(stage.x * 100).toFixed(2)}%`;
+  node.style.top = `${(stage.y * 100).toFixed(2)}%`;
+  renderWorkflowEdges(questionId);
+  markChanged(questionId);
+}
+
 function bindEvents() {
   elements.form.addEventListener("input", handleFormInput);
   elements.form.addEventListener("change", handleFormChange);
   elements.form.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
-    if (button) handleActionClick(button);
+    if (button) {
+      handleActionClick(button);
+      return;
+    }
+    const workflowNode = event.target.closest("[data-workflow-node]");
+    if (workflowNode && workflowTool !== "select" && !event.target.closest("button")) {
+      event.preventDefault();
+      handleWorkflowNodeClick(workflowNode);
+    } else if (workflowNode && !event.target.closest("input, button")) {
+      handleWorkflowNodeClick(workflowNode);
+    }
   });
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1049,30 +1378,16 @@ function bindEvents() {
     elements.mobileNavToggle.setAttribute("aria-expanded", String(open));
   });
 
-  elements.questionStack.addEventListener("dragstart", (event) => {
-    const stage = event.target.closest("[data-stage-id]");
-    if (!stage) return;
-    draggedStageId = stage.dataset.stageId;
-    stage.classList.add("is-dragging");
-    event.dataTransfer.effectAllowed = "move";
+  elements.questionStack.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest("[data-workflow-drag-handle]");
+    if (handle) beginWorkflowDrag(event, handle);
   });
-  elements.questionStack.addEventListener("dragend", (event) => {
-    event.target.closest("[data-stage-id]")?.classList.remove("is-dragging");
-    draggedStageId = null;
-  });
-  elements.questionStack.addEventListener("dragover", (event) => {
-    if (event.target.closest("[data-drop-stage]")) event.preventDefault();
-  });
-  elements.questionStack.addEventListener("drop", (event) => {
-    const target = event.target.closest("[data-drop-stage]");
-    if (!target || !draggedStageId) return;
-    event.preventDefault();
-    const workflow = state.answers.D0;
-    const from = workflow.stages.findIndex((stage) => stage.id === draggedStageId);
-    const to = workflow.stages.findIndex((stage) => stage.id === target.dataset.dropStage);
-    moveArrayItem(workflow.stages, from, to);
-    markChanged("D0");
-    render();
+  elements.questionStack.addEventListener("pointermove", moveWorkflowDrag);
+  elements.questionStack.addEventListener("pointerup", endWorkflowDrag);
+  elements.questionStack.addEventListener("pointercancel", endWorkflowDrag);
+  elements.questionStack.addEventListener("keydown", (event) => {
+    const handle = event.target.closest("[data-workflow-drag-handle]");
+    if (handle) nudgeWorkflowStage(event, handle);
   });
 }
 

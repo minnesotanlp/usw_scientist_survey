@@ -89,6 +89,8 @@ test("constant-sum question accepts exactly 100 percent", () => {
 test("workflow builder requires two named stages and serializes loop connections", () => {
   const D0 = questionIndex.get("D0");
   const workflow = createInitialWorkflow();
+  assert.equal(workflow.connections.filter((connection) => connection.type === "flow").length, 2);
+  assert.ok(workflow.stages.every((stage) => Number.isFinite(stage.x) && Number.isFinite(stage.y)));
   workflow.stages[0].label = "Question";
 
   assert.match(validateQuestion(D0, { D0: workflow }), /at least two/);
@@ -105,6 +107,16 @@ test("workflow builder requires two named stages and serializes loop connections
   assert.equal(validateQuestion(D0, { D0: workflow }), "");
   assert.match(workflowToText(workflow), /Question → Experiment/);
   assert.match(workflowToText(workflow), /Experiment ↺ Question \[if validation fails\]/);
+
+  workflow.connections.push({
+    id: "self-loop",
+    type: "loop",
+    from: workflow.stages[1].id,
+    to: workflow.stages[1].id,
+    condition: "repeat until stable",
+  });
+  assert.equal(validateQuestion(D0, { D0: workflow }), "");
+  assert.match(workflowToText(workflow), /Experiment ↺ Experiment \[repeat until stable\]/);
 });
 
 test("completion denominator follows visible branching", () => {

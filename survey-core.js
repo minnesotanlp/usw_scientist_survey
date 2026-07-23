@@ -126,13 +126,17 @@ export function validateQuestion(question, answers) {
   }
 
   if (question.type === "workflow") {
-    const labeledStages = (answer?.stages || []).filter((stage) => String(stage.label || "").trim());
+    const stages = answer?.stages || [];
+    const labeledStages = stages.filter((stage) => String(stage.label || "").trim());
     if (labeledStages.length < 2) return "Add and name at least two workflow stages.";
-    const stageIds = new Set(labeledStages.map((stage) => stage.id));
+    const stageIds = new Set(stages.map((stage) => stage.id));
     const invalidConnection = (answer?.connections || []).some(
-      (connection) => !stageIds.has(connection.from) || !stageIds.has(connection.to) || connection.from === connection.to,
+      (connection) =>
+        !stageIds.has(connection.from) ||
+        !stageIds.has(connection.to) ||
+        (connection.from === connection.to && connection.type !== "loop"),
     );
-    if (invalidConnection) return "One of the branch or loop connections points to an unavailable stage.";
+    if (invalidConnection) return "One of the workflow connections points to an unavailable stage.";
   }
 
   return "";
@@ -182,13 +186,17 @@ export function makeId(prefix = "item") {
 }
 
 export function createInitialWorkflow() {
+  const stages = [
+    { id: makeId("stage"), label: "", detail: "", x: 0.17, y: 0.5 },
+    { id: makeId("stage"), label: "", detail: "", x: 0.5, y: 0.5 },
+    { id: makeId("stage"), label: "", detail: "", x: 0.83, y: 0.5 },
+  ];
   return {
-    stages: [
-      { id: makeId("stage"), label: "", detail: "" },
-      { id: makeId("stage"), label: "", detail: "" },
-      { id: makeId("stage"), label: "", detail: "" },
+    stages,
+    connections: [
+      { id: makeId("connection"), type: "flow", from: stages[0].id, to: stages[1].id, condition: "" },
+      { id: makeId("connection"), type: "flow", from: stages[1].id, to: stages[2].id, condition: "" },
     ],
-    connections: [],
   };
 }
 
@@ -196,17 +204,17 @@ export function workflowToText(workflow) {
   const stages = (workflow?.stages || []).filter((stage) => String(stage.label || "").trim());
   if (!stages.length) return "";
   const labels = new Map(stages.map((stage, index) => [stage.id, { label: stage.label.trim(), number: index + 1 }]));
-  const main = stages.map((stage) => stage.label.trim()).join(" → ");
-  const extras = (workflow?.connections || [])
+  const connections = (workflow?.connections || [])
     .filter((connection) => labels.has(connection.from) && labels.has(connection.to))
     .map((connection) => {
       const from = labels.get(connection.from);
       const to = labels.get(connection.to);
-      const arrow = connection.type === "loop" ? "↺" : "⇢";
+      const arrow = connection.type === "loop" ? "↺" : connection.type === "branch" ? "⇢" : "→";
       const condition = String(connection.condition || "").trim();
       return `${from.label} ${arrow} ${to.label}${condition ? ` [${condition}]` : ""}`;
     });
-  return [main, ...extras].join("\n");
+  if (connections.length) return connections.join("\n");
+  return stages.map((stage) => stage.label.trim()).join(" → ");
 }
 
 export function deepClone(value) {
