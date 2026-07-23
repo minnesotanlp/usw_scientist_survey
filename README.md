@@ -1,8 +1,8 @@
 # USW Scientist Survey
 
-Interactive test implementation of **Scientist Survey v2.0** for the University of Scientific Workflow project.
+Interactive test implementation of **Scientist Survey v2.1** for the University of Scientific Workflow project, based on the v2.0 source survey and extended with participant feedback.
 
-The page includes all nine survey sections, conditional branching, validation, progress tracking, a repeatable tool inventory, and a freeform D0 workflow scratchpad. Respondents can add and name Lego-like blocks, drag them around a canvas, and draw flow, branch, loop, or self-loop arrows between them. A respondent can save, receive a recovery key, reopen, edit, and resubmit a versioned response.
+The page includes ten survey sections, conditional branching, validation, progress tracking, a repeatable tool inventory, and a freeform D0 workflow scratchpad. Respondents can add and name Lego-like blocks, drag them around a canvas, and draw flow, branch, loop, or self-loop arrows between them. The final H section collects structured and open-ended feedback on item revisions, additions, removals, screening, workflow representation, and definitions of senior scientists. A respondent can save, receive a recovery key, reopen, edit, and resubmit a versioned response.
 
 ## Important: prototype storage
 

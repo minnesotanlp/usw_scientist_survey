@@ -1030,7 +1030,7 @@ function nextSection() {
 
 function responsePayload() {
   return {
-    schemaVersion: "2.0",
+    schemaVersion: "2.1",
     answers: deepClone(state.answers),
     workflowText: workflowToText(state.answers.D0),
     status: state.status,
